@@ -44,36 +44,44 @@ async function toBase64(blob) {
 
 let flushing = null;
 function flush() {
-  if (!flushing) flushing = doFlush().finally(() => { flushing = null; });
+  if (!flushing) {
+    // One uploader at a time across the page and the service worker: two at once upload the same file twice.
+    const locks = typeof navigator !== 'undefined' && navigator.locks;
+    flushing = (locks ? locks.request('braindump-flush', doFlush) : doFlush()).finally(() => { flushing = null; });
+  }
   return flushing;
 }
 
+const pause = ms => new Promise(r => setTimeout(r, ms));
+
 // Returns {left, error}: error is null, 'setup', 'token', 'offline' or 'retry'.
 async function doFlush() {
-  const items = await outboxAll();
   const cfg = await kvGet('config');
-  if (!cfg) return { left: items.length, error: 'setup' };
-  let left = items.length;
-  for (const it of items) {
+  if (!cfg) return { left: (await outboxAll()).length, error: 'setup' };
+  const headers = { Authorization: 'Bearer ' + cfg.token, Accept: 'application/vnd.github+json' };
+  const branch = cfg.branch || 'inbox';
+  const fail = async error => ({ left: (await outboxAll()).length, error });
+  let conflicts = 0;
+  for (;;) {
+    const it = (await outboxAll())[0];  // read again every time: dumps are added while this runs
+    if (!it) return { left: 0, error: null };
     const path = ('phone/' + it.name).split('/').map(encodeURIComponent).join('/');
     const url = `https://api.github.com/repos/${cfg.repo}/contents/${path}`;
-    const headers = { Authorization: 'Bearer ' + cfg.token, Accept: 'application/vnd.github+json' };
-    const branch = cfg.branch || 'inbox';
     try {
       const r = await fetch(url, {
         method: 'PUT', headers,
         body: JSON.stringify({ message: 'phone: ' + it.name, content: await toBase64(it.blob), branch }),
       });
-      if (r.ok) { await outboxDel(it.id); left--; continue; }
-      if (r.status === 401 || r.status === 404) return { left, error: 'token' };
-      if (r.status === 422) {  // usually: it is already there, from a try whose reply never arrived
-        const g = await fetch(url + '?ref=' + encodeURIComponent(branch), { headers });
-        if (g.ok) { await outboxDel(it.id); left--; continue; }
+      if (r.ok) { await outboxDel(it.id); conflicts = 0; continue; }
+      if (r.status === 401 || r.status === 404) return fail('token');
+      if (r.status === 422 || r.status === 409) {  // usually: it is already there, from a try whose reply never arrived
+        const g = await fetch(url + '?ref=' + encodeURIComponent(branch), { headers, cache: 'no-store' });
+        if (g.ok) { await outboxDel(it.id); conflicts = 0; continue; }
+        if (r.status === 409 && ++conflicts <= 3) { await pause(1500); continue; }  // the branch moved under us: again
       }
-      return { left, error: 'retry' };
+      return fail('retry');
     } catch (e) {
-      return { left, error: 'offline' };
+      return fail('offline');
     }
   }
-  return { left, error: null };
 }

@@ -2,7 +2,7 @@
 // (Background Sync, where the browser has it) even after the app was closed.
 importScripts('outbox.js');
 
-const CACHE = 'braindump-v1';
+const CACHE = 'braindump-v2';
 const SHELL = ['./', 'index.html', 'outbox.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

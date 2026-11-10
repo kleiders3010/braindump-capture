@@ -23,7 +23,26 @@
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 
   #bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 6px; }
-  #bar .title { font-weight: 650; letter-spacing: .01em; }
+  #bar .tabs { display: flex; gap: 4px; }
+  #bar .tabs button { font-weight: 650; color: var(--dim); padding: 6px 10px; border-radius: 10px; }
+  #bar .tabs button.on { color: var(--text); background: var(--panel); }
+  #qcount { display: inline-block; min-width: 20px; margin-left: 4px; padding: 0 6px; border-radius: 999px; font-size: 12px;
+            line-height: 20px; text-align: center; background: var(--accent); color: white; }
+  #qcount:empty { display: none; }
+
+  #qview { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 28px; }
+  #qview h2 { font-size: 13px; font-weight: 650; color: var(--dim); margin: 18px 0 8px; }
+  #qview .empty { color: var(--dim); text-align: center; margin-top: 48px; }
+  .q { background: var(--panel); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
+  .q p { margin: 0; }
+  .q .note { font-size: 13px; color: var(--dim); margin-top: 6px; }
+  .q.done { opacity: .55; }
+  .q textarea { display: block; width: 100%; min-height: 96px; margin-top: 10px; padding: 8px 10px; resize: vertical;
+                border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; outline: 0; }
+  .q .row { display: flex; gap: 10px; margin-top: 10px; }
+  .q .go { flex: 1; height: 46px; border-radius: 12px; background: var(--accent); color: white; font-weight: 650; }
+  .q .go:disabled { background: var(--line); color: var(--dim); }
+  .q .drop { height: 46px; padding: 0 16px; border-radius: 12px; background: var(--bg); color: var(--dim); }
   #status { font-size: 13px; color: var(--dim); padding: 6px 10px; border-radius: 999px; background: var(--panel); }
   #bar .right { display: flex; gap: 8px; align-items: center; }
   #install { font-size: 13px; font-weight: 650; color: white; padding: 6px 12px; border-radius: 999px; background: var(--accent); }
@@ -67,9 +86,12 @@
 
 <main id="app">
   <div id="bar">
-    <span class="title">Braindump</span>
+    <span class="tabs">
+      <button id="tabDump" type="button" class="on">Dump</button>
+      <button id="tabQ" type="button">Questions<span id="qcount"></span></button>
+    </span>
     <span class="right">
-      <button id="install" type="button" hidden>Install app</button>
+      <button id="install" type="button" hidden>Install</button>
       <button id="status" type="button">&nbsp;</button>
     </span>
   </div>
@@ -82,6 +104,7 @@
     </button>
     <button id="send" type="button" disabled>Send</button>
   </div>
+  <div id="qview" hidden></div>
 </main>
 
 <section id="recording" hidden>
@@ -108,14 +131,18 @@ const text = $('text'), send = $('send'), statusEl = $('status');
 let swReg = null;
 
 // ---- naming: the PC sorts dumps by these names
+let lastStamp = '', sameStamp = 0;
 function stamp() {
   const d = new Date(), p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const s = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  sameStamp = s === lastStamp ? sameStamp + 1 : 0;  // two files in the same second must not share a name
+  lastStamp = s;
+  return sameStamp ? `${s}-${sameStamp + 1}` : s;
 }
 
 // ---- status + upload
 async function refresh(result) {
-  const left = result ? result.left : (await outboxAll()).length;
+  const left = (await outboxAll()).length;  // the real count: the background worker may have sent some meanwhile
   const error = result ? result.error : null;
   statusEl.className = '';
   if (error === 'setup' || error === 'token') {
@@ -144,6 +171,9 @@ statusEl.onclick = async () => {
 addEventListener('online', kick);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
 setInterval(async () => { if (!document.hidden && (await outboxAll()).length) kick(); }, 30000);
+setInterval(async () => {  // the background worker emptied the queue: say so
+  if (!document.hidden && statusEl.classList.contains('warn') && !(await outboxAll()).length) refresh();
+}, 4000);
 
 // ---- text dump
 text.value = localStorage.getItem('draft') || '';
@@ -248,6 +278,118 @@ async function connect(repo, token, branch) {
   return true;
 }
 
+// ---- questions: the PC's open questions about every idea (Questions.md in the repo); an answer travels as a dump
+const qview = $('qview'), DAY = 24 * 3600 * 1000;
+let qShown = '', qOpen = null;
+const qKey = it => it.title + '\n' + it.q;
+
+function parseQuestions(md) {
+  const out = [];
+  let title = null, cur = null;
+  for (const line of md.split('\n')) {
+    let m = line.match(/^##\s+\[\[(.+?)\]\]/);
+    if (m) { title = m[1]; cur = null; continue; }
+    m = line.match(/^- \[(.)\]\s+(.*)/);
+    if (m && title) {
+      cur = { title, q: m[2].trim(), onPc: m[1].toLowerCase() === 'x' };
+      out.push(cur);
+    } else if (cur && line.trim()) {
+      cur.onPc = true;  // already answered in the note on the PC, waiting to be worked in
+    }
+  }
+  return out;
+}
+
+async function renderQuestions(force) {
+  const data = await kvGet('questions'), answered = (await kvGet('answered')) || {};
+  const items = data ? parseQuestions(data.md) : [];
+  const isDone = it => it.onPc || (answered[qKey(it)] && Date.now() - answered[qKey(it)] < DAY);
+  const open = items.filter(it => !isDone(it));
+  $('qcount').textContent = open.length ? String(open.length) : '';
+  const sig = JSON.stringify([data && data.md, Object.keys(answered), qOpen, !!(await kvGet('config'))]);
+  if (!force && sig === qShown) return;  // unchanged: leave the list alone, he may be typing in it
+  qShown = sig;
+  qview.textContent = '';
+  const add = (parent, tag, cls, txt) => {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (txt) el.textContent = txt;
+    parent.appendChild(el);
+    return el;
+  };
+  if (!items.length) {
+    add(qview, 'p', 'empty', !data ? 'Loading the questions…' : 'No open questions.');
+    return;
+  }
+  let group = null;
+  for (const it of items) {
+    if (it.title !== group) { group = it.title; add(qview, 'h2', '', it.title); }
+    const key = qKey(it), done = isDone(it);
+    const card = add(qview, 'div', 'q' + (done ? ' done' : ''));
+    add(card, 'p', '', it.q);
+    if (done) { add(card, 'div', 'note', it.onPc ? 'Answered on the PC' : 'Sent · leaves the list once the PC has worked it in'); continue; }
+    if (qOpen !== key) {
+      add(card, 'div', 'note', 'Tap to answer');
+      card.onclick = () => { qOpen = key; renderQuestions(); };
+      continue;
+    }
+    const box = add(card, 'textarea');
+    box.placeholder = 'Your answer…';
+    box.value = localStorage.getItem('qdraft:' + key) || '';
+    const row = add(card, 'div', 'row');
+    const go = add(row, 'button', 'go', 'Send answer'), drop = add(row, 'button', 'drop', 'Drop');
+    go.type = drop.type = 'button';
+    go.disabled = !box.value.trim();
+    box.oninput = () => { localStorage.setItem('qdraft:' + key, box.value); go.disabled = !box.value.trim(); };
+    go.onclick = () => sendAnswer(it, box.value.trim());
+    drop.onclick = () => { if (confirm('Drop this question without answering?')) sendAnswer(it, null); };
+    setTimeout(() => box.focus(), 0);
+  }
+}
+
+async function sendAnswer(it, answer) {
+  const body = `Answer to an open question of [[${it.title}]]\n\nQuestion: ${it.q}\n\n` +
+               (answer === null ? 'Drop this question.' : 'Answer: ' + answer) + '\n';
+  await outboxAdd({ name: stamp() + ' phone answer.md', blob: new Blob([body], { type: 'text/markdown' }), created: Date.now() });
+  const answered = (await kvGet('answered')) || {};
+  answered[qKey(it)] = Date.now();
+  await kvSet('answered', answered);
+  localStorage.removeItem('qdraft:' + qKey(it));
+  qOpen = null;
+  renderQuestions();
+  kick();
+}
+
+async function loadQuestions() {
+  const cfg = await kvGet('config');
+  if (cfg) {
+    try {
+      const r = await fetch(`https://api.github.com/repos/${cfg.repo}/contents/Questions.md?ref=main`,
+        { headers: { Authorization: 'Bearer ' + cfg.token, Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' });
+      if (r.ok || r.status === 404) {
+        const md = r.ok ? await r.text() : '';
+        await kvSet('questions', { md, at: Date.now() });
+        const keys = new Set(parseQuestions(md).map(qKey)), answered = (await kvGet('answered')) || {};
+        for (const k of Object.keys(answered)) if (!keys.has(k)) delete answered[k];  // the PC has worked it in
+        await kvSet('answered', answered);
+      }
+    } catch (e) {}  // offline: the last list stays
+  }
+  return renderQuestions();
+}
+
+function showTab(questions) {
+  text.hidden = $('actions').hidden = questions;
+  qview.hidden = !questions;
+  $('tabDump').classList.toggle('on', !questions);
+  $('tabQ').classList.toggle('on', questions);
+  if (questions) { renderQuestions(true); loadQuestions(); } else text.focus();
+}
+$('tabDump').onclick = () => showTab(false);
+$('tabQ').onclick = () => showTab(true);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadQuestions(); });
+setInterval(() => { if (!document.hidden) loadQuestions(); }, 60000);
+
 // ---- install as an app: shown only while running in a browser tab
 let installPrompt = null;
 const installed = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -289,7 +431,9 @@ $('install').onclick = async () => {
     showSetup();
   }
   await kick();
-  if (new URLSearchParams(location.search).has('voice')) startRec();
+  const params = new URLSearchParams(location.search);
+  if (params.has('voice')) startRec();
+  if (params.get('tab') === 'questions') showTab(true); else loadQuestions();
 })();
 </script>
 </body>
