@@ -19,7 +19,7 @@
                font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
   button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
   [hidden] { display: none !important; }
-  #app, #recording, #setup { position: fixed; inset: 0 0 auto 0; height: 100dvh; display: flex; flex-direction: column;
+  #app, #recording, #setup, #wake { position: fixed; inset: 0 0 auto 0; height: 100dvh; display: flex; flex-direction: column;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 
   #bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 6px; }
@@ -80,6 +80,17 @@
   #save { height: 54px; border-radius: 14px; background: var(--accent); color: white; font-weight: 650; }
   #setupMsg { min-height: 22px; font-size: 14px; }
   #cancelSetup { color: var(--dim); font-size: 15px; padding: 8px; }
+
+  #wakeBtn { width: 34px; height: 32px; border-radius: 999px; background: var(--panel); color: var(--dim);
+             display: grid; place-items: center; }
+  #wakeBtn svg { width: 18px; height: 18px; }
+  #wake { background: var(--bg); padding-left: 22px; padding-right: 22px; justify-content: center; gap: 14px; overflow: auto; }
+  #wake h1 { font-size: 24px; margin: 0; }
+  #wake p { margin: 0; color: var(--dim); font-size: 15px; }
+  #wake .big { height: 54px; border-radius: 14px; background: var(--accent); color: white; font-weight: 650; }
+  #wake .big:disabled { background: var(--line); color: var(--dim); }
+  #wake .plain { color: var(--dim); font-size: 15px; padding: 8px; }
+  #wakeMsg { min-height: 22px; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -92,6 +103,11 @@
     </span>
     <span class="right">
       <button id="install" type="button" hidden>Install</button>
+      <button id="wakeBtn" type="button" aria-label="Voice wake app">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4"/>
+        </svg>
+      </button>
       <button id="status" type="button">&nbsp;</button>
     </span>
   </div>
@@ -122,6 +138,17 @@
   <button id="save" type="button">Connect</button>
   <div id="setupMsg"></div>
   <button id="cancelSetup" type="button" hidden>Cancel</button>
+</section>
+
+<section id="wake" hidden>
+  <h1>Voice wake</h1>
+  <p>A small Android app that listens for “hey notes” with the screen off, records what you say and sends it
+     here like any other voice dump. It runs next to this page.</p>
+  <button id="wakeGet" class="big" type="button">1 · Download the app</button>
+  <button id="wakeConnect" class="big" type="button">2 · Connect it</button>
+  <div id="wakeMsg"></div>
+  <button id="wakeCopy" class="plain" type="button">Copy the setup link instead</button>
+  <button id="wakeClose" class="plain" type="button">Close</button>
 </section>
 
 <script src="outbox.js"></script>
@@ -390,6 +417,65 @@ $('tabQ').onclick = () => showTab(true);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) loadQuestions(); });
 setInterval(() => { if (!document.hidden) loadQuestions(); }, 60000);
 
+// ---- the voice wake app (android/ in the project): download it, hand it this phone's connection
+const WAKE_PKG = 'app.braindump.voice', WAKE_FILE = 'braindump-voice.apk', WAKE_BRANCH = 'app';
+$('wakeBtn').onclick = () => { $('wakeMsg').textContent = ''; $('wake').hidden = false; };
+$('wakeClose').onclick = () => { $('wake').hidden = true; };
+
+$('wakeGet').onclick = async () => {
+  const msg = $('wakeMsg'), cfg = await kvGet('config');
+  if (!cfg) { msg.textContent = 'Connect this phone first.'; return; }
+  $('wakeGet').disabled = true;
+  try {
+    // The app is kept in the private repository (branch "app"), so the token this phone already has fetches it.
+    const r = await fetch(`https://api.github.com/repos/${cfg.repo}/contents/${WAKE_FILE}?ref=${WAKE_BRANCH}`,
+      { headers: { Authorization: 'Bearer ' + cfg.token, Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status === 404 ? 'The app is not in the repository yet.' : 'GitHub said ' + r.status + '.');
+    const total = +r.headers.get('Content-Length') || 0, parts = [], reader = r.body.getReader();
+    for (let got = 0;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      got += value.length;
+      msg.textContent = `Downloading… ${(got / 1048576).toFixed(0)}${total ? ' of ' + (total / 1048576).toFixed(0) : ''} MB`;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(parts, { type: 'application/vnd.android.package-archive' }));
+    a.download = WAKE_FILE;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    msg.textContent = 'Downloaded. Open it from the download notification to install it, then come back and tap 2.';
+  } catch (e) {
+    msg.textContent = e.message && !/fetch/i.test(e.message) ? e.message : 'No connection.';
+  }
+  $('wakeGet').disabled = false;
+};
+
+async function wakeSetupData() {
+  const cfg = await kvGet('config');
+  if (!cfg) return null;
+  return btoa(JSON.stringify({ t: cfg.token, r: cfg.repo, b: cfg.branch || 'inbox' }))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+$('wakeConnect').onclick = async () => {
+  const d = await wakeSetupData();
+  if (!d) { $('wakeMsg').textContent = 'Connect this phone first.'; return; }
+  const back = encodeURIComponent(location.origin + location.pathname + '?nowake=1');
+  location.href = `intent://setup?d=${d}#Intent;scheme=braindump;package=${WAKE_PKG};S.browser_fallback_url=${back};end`;
+};
+
+$('wakeCopy').onclick = async () => {
+  const d = await wakeSetupData();
+  if (!d) { $('wakeMsg').textContent = 'Connect this phone first.'; return; }
+  try {
+    await navigator.clipboard.writeText('braindump://setup?d=' + d);
+    $('wakeMsg').textContent = 'Copied. Paste it in the voice app, under "Where the notes go".';
+  } catch (e) { $('wakeMsg').textContent = 'Could not copy.'; }
+};
+
 // ---- install as an app: shown only while running in a browser tab
 let installPrompt = null;
 const installed = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -433,6 +519,11 @@ $('install').onclick = async () => {
   await kick();
   const params = new URLSearchParams(location.search);
   if (params.has('voice')) startRec();
+  if (params.has('nowake')) {  // "Connect it" found no voice app on this phone
+    history.replaceState(null, '', location.pathname);
+    $('wake').hidden = false;
+    $('wakeMsg').textContent = 'The voice app is not installed yet: tap 1 first.';
+  }
   if (params.get('tab') === 'questions') showTab(true); else loadQuestions();
 })();
 </script>
