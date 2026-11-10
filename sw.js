@@ -26,6 +26,11 @@ self.addEventListener('fetch', e => {
   }));
 });
 
+// Periodic Background Sync (installed app, Chrome on Android): the browser wakes this up now and then with the app closed.
+self.addEventListener('periodicsync', e => {
+  if (e.tag === 'flush') e.waitUntil(flush().catch(() => {}));
+});
+
 self.addEventListener('sync', e => {
   if (e.tag === 'flush') {
     e.waitUntil(flush().then(r => { if (r.left) throw new Error('not all sent yet'); }));  // rejecting = try again later

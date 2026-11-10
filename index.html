@@ -269,6 +269,9 @@ $('install').onclick = async () => {
 (async function start() {
   if ('serviceWorker' in navigator) {
     try { swReg = await navigator.serviceWorker.register('sw.js'); } catch (e) {}
+    try {  // background retries with the app closed; the browser decides how often (installed app only)
+      if (swReg && 'periodicSync' in swReg) await swReg.periodicSync.register('flush', { minInterval: 15 * 60 * 1000 });
+    } catch (e) {}
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   await saveRecording();  // a recording the app was killed in the middle of
