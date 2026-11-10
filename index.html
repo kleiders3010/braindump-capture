@@ -25,6 +25,8 @@
   #bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 6px; }
   #bar .title { font-weight: 650; letter-spacing: .01em; }
   #status { font-size: 13px; color: var(--dim); padding: 6px 10px; border-radius: 999px; background: var(--panel); }
+  #bar .right { display: flex; gap: 8px; align-items: center; }
+  #install { font-size: 13px; font-weight: 650; color: white; padding: 6px 12px; border-radius: 999px; background: var(--accent); }
   #status.warn { color: #ffcf70; }
   #status.bad { color: #ff9b9e; }
   #status.ok { color: var(--green); }
@@ -66,7 +68,10 @@
 <main id="app">
   <div id="bar">
     <span class="title">Braindump</span>
-    <button id="status" type="button">&nbsp;</button>
+    <span class="right">
+      <button id="install" type="button" hidden>Install app</button>
+      <button id="status" type="button">&nbsp;</button>
+    </span>
   </div>
   <textarea id="text" placeholder="Dump it here…" autocapitalize="sentences" autofocus></textarea>
   <div id="actions">
@@ -242,6 +247,23 @@ async function connect(repo, token, branch) {
   kick();
   return true;
 }
+
+// ---- install as an app: shown only while running in a browser tab
+let installPrompt = null;
+const installed = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; $('install').hidden = installed(); });
+addEventListener('appinstalled', () => { $('install').hidden = true; });
+$('install').hidden = installed();
+$('install').onclick = async () => {
+  if (installPrompt) {
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => {});
+    installPrompt = null;
+    return;
+  }
+  alert('To install: open the browser menu (⋮ or ≡) and choose "Add to Home screen" or "Install app".\n\n' +
+        'If the menu has neither, choose "Open in Chrome" first and install from there.');
+};
 
 // ---- start
 (async function start() {
