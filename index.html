@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#17171a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Braindump</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root { --bg: #17171a; --panel: #222226; --line: #33333a; --text: #ececf0; --dim: #8e8e99;
+          --accent: #8b5cf6; --red: #e5484d; --green: #46a758; color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  [hidden] { display: none !important; }
+  #app, #recording, #setup { position: fixed; inset: 0 0 auto 0; height: 100dvh; display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+
+  #bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 6px; }
+  #bar .title { font-weight: 650; letter-spacing: .01em; }
+  #status { font-size: 13px; color: var(--dim); padding: 6px 10px; border-radius: 999px; background: var(--panel); }
+  #status.warn { color: #ffcf70; }
+  #status.bad { color: #ff9b9e; }
+  #status.ok { color: var(--green); }
+
+  #text { flex: 1; min-height: 0; width: 100%; resize: none; border: 0; outline: 0; background: transparent;
+          color: var(--text); font: inherit; font-size: 18px; padding: 8px 16px 16px; }
+  #text::placeholder { color: #5d5d68; }
+
+  #actions { display: flex; gap: 12px; padding: 10px 16px 14px; border-top: 1px solid var(--line); background: var(--bg); }
+  #mic { flex: 0 0 64px; height: 56px; border-radius: 16px; background: var(--panel); display: grid; place-items: center; }
+  #mic svg { width: 26px; height: 26px; }
+  #send { flex: 1; height: 56px; border-radius: 16px; background: var(--accent); color: white; font-weight: 650; font-size: 18px; }
+  #send:disabled { background: var(--panel); color: var(--dim); }
+  #mic:active, #send:active { filter: brightness(1.2); }
+
+  #recording { background: #2a1214; align-items: center; justify-content: center; gap: 22px; text-align: center; }
+  #recording .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--red); display: inline-block;
+                    margin-right: 10px; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { #recording .dot { animation: none; } }
+  #clock { font-size: 56px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #stop { width: 76%; max-width: 340px; height: 84px; border-radius: 24px; background: var(--red); color: white;
+          font-size: 22px; font-weight: 650; }
+  #discard { color: var(--dim); font-size: 15px; padding: 12px 18px; }
+
+  #setup { padding-left: 22px; padding-right: 22px; justify-content: center; gap: 14px; overflow: auto; }
+  #setup h1 { font-size: 24px; margin: 0; }
+  #setup p { margin: 0; color: var(--dim); font-size: 15px; }
+  #setup label { font-size: 13px; color: var(--dim); display: block; margin-bottom: 4px; }
+  #setup input { width: 100%; height: 50px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel);
+                 color: var(--text); font: inherit; padding: 0 14px; }
+  #save { height: 54px; border-radius: 14px; background: var(--accent); color: white; font-weight: 650; }
+  #setupMsg { min-height: 22px; font-size: 14px; }
+  #cancelSetup { color: var(--dim); font-size: 15px; padding: 8px; }
+</style>
+</head>
+<body>
+
+<main id="app">
+  <div id="bar">
+    <span class="title">Braindump</span>
+    <button id="status" type="button">&nbsp;</button>
+  </div>
+  <textarea id="text" placeholder="Dump it here…" autocapitalize="sentences" autofocus></textarea>
+  <div id="actions">
+    <button id="mic" type="button" aria-label="Record a voice dump">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/>
+      </svg>
+    </button>
+    <button id="send" type="button" disabled>Send</button>
+  </div>
+</main>
+
+<section id="recording" hidden>
+  <div><span class="dot"></span>Recording</div>
+  <div id="clock">0:00</div>
+  <button id="stop" type="button">Stop and send</button>
+  <button id="discard" type="button">Discard</button>
+</section>
+
+<section id="setup" hidden>
+  <h1>Connect this phone</h1>
+  <p>Paste the access token for your braindump repository. It is stored only on this phone.</p>
+  <div><label for="repo">Repository (owner/name)</label><input id="repo" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="owner/braindump"></div>
+  <div><label for="token">Access token</label><input id="token" type="password" autocomplete="off" placeholder="github_pat_…"></div>
+  <button id="save" type="button">Connect</button>
+  <div id="setupMsg"></div>
+  <button id="cancelSetup" type="button" hidden>Cancel</button>
+</section>
+
+<script src="outbox.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const text = $('text'), send = $('send'), statusEl = $('status');
+let swReg = null;
+
+// ---- naming: the PC sorts dumps by these names
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// ---- status + upload
+async function refresh(result) {
+  const left = result ? result.left : (await outboxAll()).length;
+  const error = result ? result.error : null;
+  statusEl.className = '';
+  if (error === 'setup' || error === 'token') {
+    statusEl.textContent = left ? `${left} waiting · connect phone` : 'Connect phone';
+    statusEl.classList.add('bad');
+  } else if (left) {
+    statusEl.textContent = `${left} waiting` + (error === 'offline' ? ' · offline' : error ? ' · retrying' : ' · sending…');
+    statusEl.classList.add('warn');
+  } else {
+    statusEl.textContent = 'All sent';
+    statusEl.classList.add('ok');
+  }
+  return { left, error };
+}
+
+async function kick() {
+  await refresh();
+  if (swReg && 'sync' in swReg) swReg.sync.register('flush').catch(() => {});  // keeps trying after the app is closed
+  return refresh(await flush());
+}
+
+statusEl.onclick = async () => {
+  const r = await kick();
+  if (r.error === 'setup' || r.error === 'token') showSetup(true);
+};
+addEventListener('online', kick);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
+setInterval(async () => { if (!document.hidden && (await outboxAll()).length) kick(); }, 30000);
+
+// ---- text dump
+text.value = localStorage.getItem('draft') || '';
+send.disabled = !text.value.trim();
+text.oninput = () => { localStorage.setItem('draft', text.value); send.disabled = !text.value.trim(); };
+send.onclick = async () => {
+  const body = text.value.trim();
+  if (!body) return;
+  await outboxAdd({ name: stamp() + ' phone.md', blob: new Blob([body + '\n'], { type: 'text/markdown' }), created: Date.now() });
+  text.value = '';
+  localStorage.removeItem('draft');
+  send.disabled = true;
+  text.focus();
+  kick();
+};
+
+// ---- voice dump: chunks go to disk as they arrive, so a killed app still leaves a usable recording
+let recorder = null, stream = null, recT0 = 0, clockTimer = 0, wakeLock = null, discarding = false;
+const MIMES = [['audio/webm;codecs=opus', 'webm'], ['audio/mp4', 'm4a'], ['audio/ogg;codecs=opus', 'ogg'], ['audio/webm', 'webm']];
+
+async function saveRecording() {
+  const chunks = await recAll(), meta = await kvGet('recmeta');
+  if (chunks.length && meta) {
+    await outboxAdd({ name: meta.name, blob: new Blob(chunks, { type: meta.mime }), created: Date.now() });
+  }
+  await recClear();
+  await kvDel('recmeta');
+}
+
+async function startRec() {
+  if (recorder) return;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    statusEl.textContent = 'Microphone blocked';
+    statusEl.className = 'bad';
+    return;
+  }
+  const pick = MIMES.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m[0])) || ['', 'webm'];
+  recorder = new MediaRecorder(stream, pick[0] ? { mimeType: pick[0], audioBitsPerSecond: 48000 } : undefined);
+  await recClear();
+  await kvSet('recmeta', { name: `${stamp()} phone voice.${pick[1]}`, mime: recorder.mimeType || pick[0] });
+  let pending = Promise.resolve();
+  recorder.ondataavailable = e => { if (e.data && e.data.size) pending = pending.then(() => recAdd(e.data)); };
+  recorder.onstop = async () => {
+    await pending;
+    if (discarding) { await recClear(); await kvDel('recmeta'); } else { await saveRecording(); }
+    discarding = false;
+    kick();
+  };
+  recorder.start(2000);
+  recT0 = Date.now();
+  $('clock').textContent = '0:00';
+  clockTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - recT0) / 1000);
+    $('clock').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }, 500);
+  $('recording').hidden = false;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+
+function stopRec(discard) {
+  if (!recorder) return;
+  discarding = !!discard;
+  clearInterval(clockTimer);
+  recorder.stop();
+  stream.getTracks().forEach(t => t.stop());
+  recorder = null;
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  $('recording').hidden = true;
+}
+
+$('mic').onclick = startRec;
+$('stop').onclick = () => stopRec(false);
+$('discard').onclick = () => { if (confirm('Throw this recording away?')) stopRec(true); };
+
+// ---- connect the phone
+function showSetup(canCancel) {
+  $('setup').hidden = false;
+  $('cancelSetup').hidden = !canCancel;
+  kvGet('config').then(c => { if (c) { $('repo').value = c.repo; } });
+}
+$('cancelSetup').onclick = () => { $('setup').hidden = true; };
+$('save').onclick = () => connect($('repo').value.trim(), $('token').value.trim(), 'inbox');
+
+async function connect(repo, token, branch) {
+  const msg = $('setupMsg');
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { msg.textContent = 'Fill in both fields.'; return false; }
+  msg.textContent = 'Checking…';
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}/branches/${encodeURIComponent(branch)}`,
+      { headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' } });
+    if (!r.ok) { msg.textContent = r.status === 401 ? 'That token is not valid.' : 'The token cannot reach that repository.'; return false; }
+  } catch (e) {
+    msg.textContent = 'No connection. Saved anyway; it will be checked when you send.';
+  }
+  await kvSet('config', { repo, token, branch });
+  $('token').value = '';
+  $('setup').hidden = true;
+  msg.textContent = '';
+  kick();
+  return true;
+}
+
+// ---- start
+(async function start() {
+  if ('serviceWorker' in navigator) {
+    try { swReg = await navigator.serviceWorker.register('sw.js'); } catch (e) {}
+  }
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  await saveRecording();  // a recording the app was killed in the middle of
+
+  const m = location.hash.match(/^#setup=(.+)$/);  // the link from the PC's setup QR code
+  if (m) {
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      const c = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
+      $('setup').hidden = false;
+      $('repo').value = c.r;
+      await connect(c.r, c.t, c.b || 'inbox');
+    } catch (e) { showSetup(); }
+  } else if (!(await kvGet('config'))) {
+    showSetup();
+  }
+  await kick();
+  if (new URLSearchParams(location.search).has('voice')) startRec();
+})();
+</script>
+</body>
+</html>
