@@ -22,17 +22,38 @@
   #app, #recording, #setup, #wake { position: fixed; inset: 0 0 auto 0; height: 100dvh; display: flex; flex-direction: column;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 
-  #bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 6px; }
-  #bar .tabs { display: flex; gap: 4px; }
-  #bar .tabs button { font-weight: 650; color: var(--dim); padding: 6px 10px; border-radius: 10px; }
+  #bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px;
+         padding: 10px 12px 6px; }
+  #bar .tabs { display: flex; gap: 2px; }
+  #bar .tabs button { font-weight: 650; font-size: 16px; color: var(--dim); padding: 6px 9px; border-radius: 10px;
+                      white-space: nowrap; }
   #bar .tabs button.on { color: var(--text); background: var(--panel); }
   #qcount { display: inline-block; min-width: 20px; margin-left: 4px; padding: 0 6px; border-radius: 999px; font-size: 12px;
             line-height: 20px; text-align: center; background: var(--accent); color: white; }
   #qcount:empty { display: none; }
 
   #qview { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 28px; }
-  #qview h2 { font-size: 13px; font-weight: 650; color: var(--dim); margin: 18px 0 8px; }
-  #qview .empty { color: var(--dim); text-align: center; margin-top: 48px; }
+  #qview h2 { font-size: 19px; font-weight: 700; color: var(--text); margin: 22px 0 2px; }
+  #qview .sub { font-size: 13px; color: var(--dim); margin: 0 0 10px; display: -webkit-box; -webkit-line-clamp: 3;
+                -webkit-box-orient: vertical; overflow: hidden; }
+  #qview .empty, #rview .empty { color: var(--dim); text-align: center; margin-top: 48px; }
+  .q .about { font-size: 12px; font-weight: 700; color: #b79cff; letter-spacing: .02em; margin-bottom: 4px; }
+  .banner { display: block; width: 100%; text-align: left; border-radius: 14px; padding: 10px 14px; margin: 6px 0 4px;
+            font-size: 14px; line-height: 1.4; background: #3a3016; color: #ffcf70; }
+  .banner.ok { background: #16301d; color: var(--green); }
+  #rdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ffcf70; margin-left: 6px;
+          vertical-align: middle; }
+  #rview { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px 28px; }
+  #rview .foot { font-size: 13px; color: var(--dim); margin: 14px 2px 0; }
+  .d { background: var(--panel); border-radius: 14px; padding: 10px 14px; margin-bottom: 8px; }
+  .d .top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .d .when { font-weight: 650; }
+  .d .meta { font-size: 13px; color: var(--dim); }
+  .d .stage { font-size: 13px; margin-top: 2px; }
+  .d .stage.ok { color: var(--green); }
+  .d .stage.wait { color: #ffcf70; }
+  .d .stage.bad { color: #ff9b9e; }
+  .d .body { white-space: pre-wrap; font-size: 15px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   .q { background: var(--panel); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
   .q p { margin: 0; }
   .q .note { font-size: 13px; color: var(--dim); margin-top: 6px; }
@@ -44,7 +65,7 @@
   .q .go:disabled { background: var(--line); color: var(--dim); }
   .q .drop { height: 46px; padding: 0 16px; border-radius: 12px; background: var(--bg); color: var(--dim); }
   #status { font-size: 13px; color: var(--dim); padding: 6px 10px; border-radius: 999px; background: var(--panel); }
-  #bar .right { display: flex; gap: 8px; align-items: center; }
+  #bar .right { display: flex; gap: 8px; align-items: center; margin-left: auto; white-space: nowrap; }
   #install { font-size: 13px; font-weight: 650; color: white; padding: 6px 12px; border-radius: 999px; background: var(--accent); }
   #status.warn { color: #ffcf70; }
   #status.bad { color: #ff9b9e; }
@@ -100,6 +121,7 @@
     <span class="tabs">
       <button id="tabDump" type="button" class="on">Dump</button>
       <button id="tabQ" type="button">Questions<span id="qcount"></span></button>
+      <button id="tabR" type="button">Recent<span id="rdot" hidden></span></button>
     </span>
     <span class="right">
       <button id="install" type="button" hidden>Install</button>
@@ -121,6 +143,7 @@
     <button id="send" type="button" disabled>Send</button>
   </div>
   <div id="qview" hidden></div>
+  <div id="rview" hidden></div>
 </main>
 
 <section id="recording" hidden>
@@ -333,7 +356,9 @@ async function renderQuestions(force) {
   const isDone = it => it.onPc || (answered[qKey(it)] && Date.now() - answered[qKey(it)] < DAY);
   const open = items.filter(it => !isDone(it));
   $('qcount').textContent = open.length ? String(open.length) : '';
-  const sig = JSON.stringify([data && data.md, Object.keys(answered), qOpen, !!(await kvGet('config'))]);
+  const prog = await progress(), notes = (prog.status && prog.status.notes) || {};
+  const sig = JSON.stringify([data && data.md, Object.keys(answered), qOpen, !!(await kvGet('config')),
+                              prog.pending.map(d => d.name + d.stage), notes]);
   if (!force && sig === qShown) return;  // unchanged: leave the list alone, he may be typing in it
   qShown = sig;
   qview.textContent = '';
@@ -344,15 +369,32 @@ async function renderQuestions(force) {
     parent.appendChild(el);
     return el;
   };
+  if (prog.pending.length) {  // dumps the notes do not know yet: a question may already be answered in them
+    const n = prog.pending.length;
+    const b = add(qview, 'button', 'banner', `${n} ${n === 1 ? 'dump is' : 'dumps are'} not in the notes yet (` +
+      prog.pending.slice(0, 3).map(d => when(d.name)).join(', ') + (n > 3 ? ', …' : '') +
+      '). These questions were written without ' + (n === 1 ? 'it' : 'them') + ' and may change. Tap to see.');
+    b.type = 'button';
+    b.onclick = () => showTab('recent');
+  } else if (prog.status) {
+    add(qview, 'div', 'banner ok', 'Up to date: everything you sent is in the notes.');
+  }
   if (!items.length) {
     add(qview, 'p', 'empty', !data ? 'Loading the questions…' : 'No open questions.');
     return;
   }
+  const idea = it => (notes[it.title] && notes[it.title].idea) || it.title.replace(/ - [^-]+$/, '');
   let group = null;
   for (const it of items) {
-    if (it.title !== group) { group = it.title; add(qview, 'h2', '', it.title); }
+    const ctx = notes[it.title] || {};
+    if (it.title !== group) {
+      group = it.title;
+      add(qview, 'h2', '', idea(it));
+      if (ctx.about) add(qview, 'p', 'sub', ctx.about);
+    }
     const key = qKey(it), done = isDone(it);
     const card = add(qview, 'div', 'q' + (done ? ' done' : ''));
+    add(card, 'div', 'about', idea(it) + (ctx.area ? ' · ' + ctx.area : ''));  // on every card: the header scrolls away
     add(card, 'p', '', it.q);
     if (done) { add(card, 'div', 'note', it.onPc ? 'Answered on the PC' : 'Sent · leaves the list once the PC has worked it in'); continue; }
     if (qOpen !== key) {
@@ -405,17 +447,154 @@ async function loadQuestions() {
   return renderQuestions();
 }
 
-function showTab(questions) {
-  text.hidden = $('actions').hidden = questions;
-  qview.hidden = !questions;
-  $('tabDump').classList.toggle('on', !questions);
-  $('tabQ').classList.toggle('on', questions);
-  if (questions) { renderQuestions(true); loadQuestions(); } else text.focus();
+// ---- progress: how far the PC is with every recent dump (status.json on the `status` branch, written by the PC)
+const rview = $('rview');
+const STAGES = {
+  phone: ['On this phone, not sent yet', 'wait'],
+  inbox: ['Sent · waiting for the PC', 'wait'],
+  waiting: ['On the PC · waiting to be transcribed', 'wait'],
+  transcribing: ['Being transcribed…', 'wait'],
+  transcribed: ['Transcribed · not in the notes yet', 'wait'],
+  received: ['On the PC · not in the notes yet', 'wait'],
+  organizing: ['Going into the notes right now…', 'wait'],
+  notes: ['In the notes', 'ok'],
+  failed: ['Transcription failed · the recording is kept', 'bad'],
+};
+let rOpen = null, rShown = '';
+const rBodies = {};
+const stem = n => n.replace(/\.[^.]+$/, '');
+const kindOf = n => / answer(\.|$)/.test(n) ? 'answer' : /\.(md|txt)$/i.test(n) ? 'text' : 'voice';
+
+function when(name) {  // "2026-11-11 114723 phone voice" -> "today 11:47"
+  const m = name.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2})(\d{2})/);
+  if (!m) return name;
+  const d = new Date(+m[1], m[2] - 1, +m[3]), now = new Date();
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - d) / DAY);
+  const day = days === 0 ? 'today' : days === 1 ? 'yesterday'
+    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${day} ${m[4]}:${m[5]}`;
 }
-$('tabDump').onclick = () => showTab(false);
-$('tabQ').onclick = () => showTab(true);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) loadQuestions(); });
+
+// Everything recent, newest first: what is still on this phone, what waits in the inbox, what the PC reports.
+async function progress() {
+  const p = (await kvGet('progress')) || {}, status = p.status || null;
+  const dumps = (status && status.dumps) || [], taken = (status && status.imported) || [];
+  const known = new Set(dumps.map(d => d.name).concat(taken.map(stem)));
+  const oldest = taken.length >= 40 ? stem(taken[0]) : '';  // the PC lists the last 40 it took out of the inbox
+  const list = [];
+  for (const it of await outboxAll()) list.push({ name: stem(it.name), kind: kindOf(it.name), stage: 'phone' });
+  if (status) {
+    for (const n of p.inbox || []) {
+      const s = stem(n);
+      if (!known.has(s) && s > oldest && !list.some(o => o.name === s)) list.push({ name: s, kind: kindOf(n), stage: 'inbox' });
+    }
+  }
+  for (const d of dumps) if (!list.some(o => o.name === d.name)) list.push(d);
+  list.sort((a, b) => (a.name < b.name ? 1 : -1));
+  const pending = list.filter(d => d.stage !== 'notes' && d.stage !== 'failed');
+  $('rdot').hidden = !pending.length;
+  return { status, list, pending };
+}
+
+async function renderRecent(force) {
+  const { status, list } = await progress();
+  const sig = JSON.stringify([list, rOpen, rBodies[rOpen]]);
+  if (!force && sig === rShown) return;
+  rShown = sig;
+  rview.textContent = '';
+  const add = (parent, tag, cls, txt) => {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (txt) el.textContent = txt;
+    parent.appendChild(el);
+    return el;
+  };
+  if (!list.length) {
+    add(rview, 'p', 'empty', status ? 'Nothing sent yet.' : 'The PC has not reported yet.');
+    return;
+  }
+  for (const d of list) {
+    const card = add(rview, 'div', 'd'), top = add(card, 'div', 'top');
+    add(top, 'span', 'when', when(d.name));
+    add(top, 'span', 'meta', (d.kind === 'voice' ? 'Voice' : d.kind === 'answer' ? 'Answer' : 'Text') +
+      (d.duration ? ' · ' + d.duration : ''));
+    const [label, cls] = STAGES[d.stage] || [d.stage, 'wait'];
+    add(card, 'div', 'stage ' + cls, label);
+    const readable = d.kind !== 'voice' ? !['phone', 'inbox'].includes(d.stage)
+      : ['transcribed', 'organizing', 'notes'].includes(d.stage);
+    if (!readable) continue;
+    if (rOpen !== d.name) {
+      add(card, 'div', 'meta', d.kind === 'voice' ? 'Tap to read what was understood' : 'Tap to read it');
+      card.onclick = () => { rOpen = d.name; renderRecent(); loadBody(d.name); };
+    } else {
+      add(card, 'div', 'body', rBodies[d.name] === undefined ? 'Loading…' : rBodies[d.name]);
+      top.onclick = () => { rOpen = null; renderRecent(); };
+    }
+  }
+  add(rview, 'p', 'foot', 'Recordings the voice app has not sent yet show in that app, not here.');
+}
+
+async function loadBody(name) {
+  const cfg = await kvGet('config');
+  if (!cfg || rBodies[name] !== undefined) return;
+  try {
+    const path = encodeURIComponent('Dumps/' + name + '.md').replace(/%2F/g, '/');
+    const r = await fetch(`https://api.github.com/repos/${cfg.repo}/contents/${path}?ref=main`,
+      { headers: { Authorization: 'Bearer ' + cfg.token, Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' });
+    if (r.ok) {
+      rBodies[name] = (await r.text()).replace(/^---\n[\s\S]*?\n---\n/, '').replace(/^!\[\[.*\]\]\s*$/m, '').trim()
+        || '(nothing was said)';
+    } else if (r.status === 404) {
+      rBodies[name] = 'Not on GitHub yet. Try again in a moment.';
+      setTimeout(() => { delete rBodies[name]; }, 15000);
+    } else {
+      return;
+    }
+  } catch (e) { return; }  // offline
+  renderRecent();
+}
+
+async function loadProgress() {
+  const cfg = await kvGet('config');
+  if (cfg) {
+    const get = (path, accept) => fetch(`https://api.github.com/repos/${cfg.repo}/${path}`,
+      { headers: { Authorization: 'Bearer ' + cfg.token, Accept: accept }, cache: 'no-store' });
+    try {
+      const [s, t] = await Promise.all([
+        get('contents/status.json?ref=status', 'application/vnd.github.raw+json'),
+        get(`git/trees/${encodeURIComponent((cfg.branch || 'inbox') + ':phone')}`, 'application/vnd.github+json')]);
+      const p = (await kvGet('progress')) || {};
+      if (s.ok) p.status = await s.json();
+      if (t.ok) p.inbox = ((await t.json()).tree || []).map(e => e.path);
+      await kvSet('progress', p);
+    } catch (e) {}  // offline: the last report stays
+  }
+  await renderRecent();
+  return renderQuestions();
+}
+
+let tab = 'dump';
+function showTab(name) {
+  tab = name;
+  text.hidden = $('actions').hidden = name !== 'dump';
+  qview.hidden = name !== 'questions';
+  rview.hidden = name !== 'recent';
+  $('tabDump').classList.toggle('on', name === 'dump');
+  $('tabQ').classList.toggle('on', name === 'questions');
+  $('tabR').classList.toggle('on', name === 'recent');
+  if (name === 'questions') { renderQuestions(true); loadQuestions(); loadProgress(); }
+  else if (name === 'recent') { renderRecent(true); loadProgress(); }
+  else text.focus();
+}
+$('tabDump').onclick = () => showTab('dump');
+$('tabQ').onclick = () => showTab('questions');
+$('tabR').onclick = () => showTab('recent');
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { loadQuestions(); loadProgress(); } });
 setInterval(() => { if (!document.hidden) loadQuestions(); }, 60000);
+setInterval(async () => {  // while something is on its way, or one of these tabs is open, follow it closely
+  if (document.hidden) return;
+  if (tab !== 'dump' || (await progress()).pending.length) { await loadProgress(); if (tab === 'questions') loadQuestions(); }
+}, 15000);
 
 // ---- the voice wake app (android/ in the project): download it, hand it this phone's connection
 const WAKE_PKG = 'app.braindump.voice', WAKE_FILE = 'braindump-voice.apk', WAKE_BRANCH = 'app';
@@ -524,7 +703,8 @@ $('install').onclick = async () => {
     $('wake').hidden = false;
     $('wakeMsg').textContent = 'The voice app is not installed yet: tap 1 first.';
   }
-  if (params.get('tab') === 'questions') showTab(true); else loadQuestions();
+  if (params.get('tab') === 'questions' || params.get('tab') === 'recent') showTab(params.get('tab')); else loadQuestions();
+  loadProgress();
 })();
 </script>
 </body>
