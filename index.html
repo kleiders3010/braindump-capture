@@ -90,7 +90,6 @@
   #clock { font-size: 56px; font-weight: 650; font-variant-numeric: tabular-nums; }
   #stop { width: 76%; max-width: 340px; height: 84px; border-radius: 24px; background: var(--red); color: white;
           font-size: 22px; font-weight: 650; }
-  #discard { color: var(--dim); font-size: 15px; padding: 12px 18px; }
 
   #setup { padding-left: 22px; padding-right: 22px; justify-content: center; gap: 14px; overflow: auto; }
   #setup h1 { font-size: 24px; margin: 0; }
@@ -150,7 +149,6 @@
   <div><span class="dot"></span>Recording</div>
   <div id="clock">0:00</div>
   <button id="stop" type="button">Stop and send</button>
-  <button id="discard" type="button">Discard</button>
 </section>
 
 <section id="setup" hidden>
@@ -241,7 +239,7 @@ send.onclick = async () => {
 };
 
 // ---- voice dump: chunks go to disk as they arrive, so a killed app still leaves a usable recording
-let recorder = null, stream = null, recT0 = 0, clockTimer = 0, wakeLock = null, discarding = false;
+let recorder = null, stream = null, recT0 = 0, clockTimer = 0, wakeLock = null;
 const MIMES = [['audio/webm;codecs=opus', 'webm'], ['audio/mp4', 'm4a'], ['audio/ogg;codecs=opus', 'ogg'], ['audio/webm', 'webm']];
 
 async function saveRecording() {
@@ -270,8 +268,7 @@ async function startRec() {
   recorder.ondataavailable = e => { if (e.data && e.data.size) pending = pending.then(() => recAdd(e.data)); };
   recorder.onstop = async () => {
     await pending;
-    if (discarding) { await recClear(); await kvDel('recmeta'); } else { await saveRecording(); }
-    discarding = false;
+    await saveRecording();  // always: there is no way to discard a recording (his rule, 2026-11-11)
     kick();
   };
   recorder.start(2000);
@@ -285,9 +282,8 @@ async function startRec() {
   try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
 }
 
-function stopRec(discard) {
+function stopRec() {
   if (!recorder) return;
-  discarding = !!discard;
   clearInterval(clockTimer);
   recorder.stop();
   stream.getTracks().forEach(t => t.stop());
@@ -297,8 +293,7 @@ function stopRec(discard) {
 }
 
 $('mic').onclick = startRec;
-$('stop').onclick = () => stopRec(false);
-$('discard').onclick = () => { if (confirm('Throw this recording away?')) stopRec(true); };
+$('stop').onclick = () => stopRec();
 
 // ---- connect the phone
 function showSetup(canCancel) {
